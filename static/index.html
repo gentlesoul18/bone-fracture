@@ -113,7 +113,7 @@
         const formData = new FormData();
         formData.append("image", file);
 
-        fetch("/api/detect-fracture", {
+        fetch("https://barakat-bone-fracture-interface.onrender.com/api/detect-fracture", {
           method: "POST",
           body: formData,
         })
