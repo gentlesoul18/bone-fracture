@@ -45,23 +45,18 @@ def preprocess_image(image_bytes):
 @app.route('/api/detect-fracture', methods=['POST'])
 @cross_origin()
 def detect_fracture():
-    print('first got here')
     print(request.files)
     if 'image' not in request.files:
         return jsonify({'error': 'No image file provided'}), 400
     
     image_file = request.files['image']
-    print('second got here')
     image_bytes = image_file.read()
-    print('third got here')
     
     # Preprocess the image
     preprocessed_image = preprocess_image(image_bytes)
-    print('fourth got here')
     
     # Make prediction
     prediction = model.predict(preprocessed_image)
-    print('fifth got here')
     print(prediction)
     
     # Assuming binary classification (fractured or not fractured)
