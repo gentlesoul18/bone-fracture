@@ -10,11 +10,21 @@
             color: #ff0000;
             margin-top: 10px;
             text-align: center;
+            padding: 10px;
+            background-color: #ffebee;
+            border-radius: 5px;
+            display: none;
         }
         .loading {
             display: none;
             text-align: center;
             margin-top: 10px;
+            color: #8e44ad;
+        }
+        .probability {
+            margin-top: 10px;
+            text-align: center;
+            color: #666;
         }
     </style>
 </head>
@@ -32,14 +42,17 @@
         </div>
         <div id="loading" class="loading">Processing image...</div>
         <div id="result"></div>
+        <div id="probability" class="probability"></div>
         <div id="error" class="error-message"></div>
     </div>
     <script>
-        document.getElementById("fileInput").addEventListener("change", function (event) {
+        document.getElementById("fileInput").addEventListener("change", async function (event) {
             const file = event.target.files[0];
             if (file) {
                 // Clear previous results and errors
                 document.getElementById("result").innerText = "";
+                document.getElementById("probability").innerText = "";
+                document.getElementById("error").style.display = "none";
                 document.getElementById("error").innerText = "";
                 
                 const reader = new FileReader();
@@ -52,38 +65,41 @@
             }
         });
 
-        function detectFracture(file) {
+        async function detectFracture(file) {
             const formData = new FormData();
             formData.append("image", file);
             
             // Show loading indicator
-            document.getElementById("loading").style.display = "block";
+            const loadingEl = document.getElementById("loading");
+            loadingEl.style.display = "block";
             
-            fetch("/api/detect-fracture", {
-                method: "POST",
-                body: formData,
-            })
-            .then(response => {
+            try {
+                const response = await fetch("/api/detect-fracture", {
+                    method: "POST",
+                    body: formData,
+                });
+
                 if (!response.ok) {
-                    return response.json().then(data => {
-                        throw new Error(data.error || 'Server error');
-                    });
+                    throw new Error(`HTTP error! status: ${response.status}`);
                 }
-                return response.json();
-            })
-            .then(data => {
+
+                const data = await response.json();
+                
+                if (data.error) {
+                    throw new Error(data.error);
+                }
+
                 document.getElementById("result").innerText = `Result: ${data.result}`;
-                document.getElementById("error").innerText = "";
-            })
-            .catch(error => {
+            } catch (error) {
                 console.error("Error:", error);
                 document.getElementById("result").innerText = "";
-                document.getElementById("error").innerText = `Error: ${error.message}`;
-            })
-            .finally(() => {
-                // Hide loading indicator
-                document.getElementById("loading").style.display = "none";
-            });
+                document.getElementById("probability").innerText = "";
+                document.getElementById("error").style.display = "block";
+                document.getElementById("error").innerText = 
+                    `Error: ${error.message || 'Failed to process image. Please try again.'}`;
+            } finally {
+                loadingEl.style.display = "none";
+            }
         }
     </script>
 </body>

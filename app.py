@@ -7,6 +7,7 @@ import io
 import sys
 import os
 import logging
+import traceback
 
 # Set up logging
 logging.basicConfig(level=logging.DEBUG)
@@ -15,6 +16,7 @@ logger = logging.getLogger(__name__)
 app = Flask(__name__, static_folder='static')
 CORS(app)
 app.config['CORS_HEADERS'] = 'Content-Type'
+app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max file size
 
 # Load the pre-trained model
 def load_model_with_custom_objects(model_path):
@@ -43,12 +45,16 @@ model_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'pretraine
 logger.info(f"Model path: {model_path}")
 
 # Load the pre-trained model
-model = load_model_with_custom_objects(model_path)
-if model:
-    logger.info(f"Model input shape: {model.input_shape}")
-    logger.info(f"Model output shape: {model.output_shape}")
-else:
-    logger.error("Failed to load model")
+try:
+    model = load_model_with_custom_objects(model_path)
+    if model:
+        logger.info(f"Model input shape: {model.input_shape}")
+        logger.info(f"Model output shape: {model.output_shape}")
+    else:
+        logger.error("Failed to load model")
+except Exception as e:
+    logger.error(f"Error during model loading: {str(e)}")
+    model = None
 
 def preprocess_image(image_bytes):
     try:
@@ -59,7 +65,7 @@ def preprocess_image(image_bytes):
         image_array = image_array.reshape(1, 128, 128, 1)
         return image_array
     except Exception as e:
-        logger.error(f"Error preprocessing image: {str(e)}")
+        logger.error(f"Error preprocessing image: {str(e)}\n{traceback.format_exc()}")
         raise
 
 @app.route('/api/detect-fracture', methods=['POST'])
@@ -67,48 +73,75 @@ def preprocess_image(image_bytes):
 def detect_fracture():
     try:
         logger.info("Received fracture detection request")
-        logger.debug(f"Request files: {request.files}")
         
+        # Check if the post request has the file part
         if 'image' not in request.files:
             logger.error("No image file in request")
             return jsonify({'error': 'No image file provided'}), 400
         
         image_file = request.files['image']
-        image_bytes = image_file.read()
-        logger.info(f"Image size: {len(image_bytes)} bytes")
         
-        if not model:
+        # If user does not select file, browser also submits an empty part without filename
+        if image_file.filename == '':
+            logger.error("No selected file")
+            return jsonify({'error': 'No selected file'}), 400
+        
+        # Read the image file
+        try:
+            image_bytes = image_file.read()
+            logger.info(f"Successfully read image file of size: {len(image_bytes)} bytes")
+        except Exception as e:
+            logger.error(f"Error reading image file: {str(e)}")
+            return jsonify({'error': 'Error reading image file'}), 400
+        
+        # Check if model is loaded
+        if model is None:
             logger.error("Model not loaded")
             return jsonify({'error': 'Model not available'}), 500
         
         # Preprocess the image
-        preprocessed_image = preprocess_image(image_bytes)
-        logger.info("Image preprocessed successfully")
+        try:
+            preprocessed_image = preprocess_image(image_bytes)
+            logger.info("Image preprocessed successfully")
+        except Exception as e:
+            logger.error(f"Error preprocessing image: {str(e)}")
+            return jsonify({'error': 'Error preprocessing image'}), 400
         
         # Make prediction
-        prediction = model.predict(preprocessed_image)
-        logger.info(f"Prediction made: {prediction}")
-        
-        # Assuming binary classification (fractured or not fractured)
-        result = 'Fractured' if prediction[0][0] > 0.5 else 'Not Fractured'
-        logger.info(f"Final result: {result}")
-        
-        return jsonify({'result': result})
+        try:
+            prediction = model.predict(preprocessed_image)
+            logger.info(f"Raw prediction: {prediction}")
+            
+            if not isinstance(prediction, np.ndarray) or prediction.size == 0:
+                logger.error("Invalid prediction output")
+                return jsonify({'error': 'Invalid prediction output'}), 500
+                
+            result = 'Fractured' if prediction[0][0] > 0.5 else 'Not Fractured'
+            probability = float(prediction[0][0])  # Convert to Python float for JSON serialization
+            
+            logger.info(f"Final result: {result} with probability: {probability}")
+            return jsonify({
+                'result': result
+            })
+            
+        except Exception as e:
+            logger.error(f"Error making prediction: {str(e)}\n{traceback.format_exc()}")
+            return jsonify({'error': 'Error making prediction'}), 500
+            
     except Exception as e:
-        logger.error(f"Error in detect_fracture: {str(e)}")
-        return jsonify({'error': str(e)}), 500
+        logger.error(f"Unexpected error: {str(e)}\n{traceback.format_exc()}")
+        return jsonify({'error': 'Internal server error'}), 500
 
 @app.route('/')
 @cross_origin()
 def index():
     try:
-        logger.info("Serving index.html")
         return send_from_directory(app.static_folder, 'index.html')
     except Exception as e:
         logger.error(f"Error serving index.html: {str(e)}")
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': 'Error serving page'}), 500
 
 if __name__ == '__main__':
-    # Get port from environment variable for Render deployment
     port = int(os.environ.get('PORT', 5000))
-    app.run(host='0.0.0.0', port=port, debug=True)
+    logger.info(f"Starting server on port {port}")
+    app.run(host='0.0.0.0', port=port)
