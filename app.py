@@ -109,6 +109,7 @@ def detect_fracture():
         
         # Make prediction
         try:
+            logger.info(f"Model input shape after preprocess: {model.input_shape}")
             prediction = model.predict(preprocessed_image)
             logger.info(f"Raw prediction: {prediction}")
             
@@ -120,6 +121,9 @@ def detect_fracture():
             probability = float(prediction[0][0])  # Convert to Python float for JSON serialization
             
             logger.info(f"Final result: {result} with probability: {probability}")
+            logger.info(jsonify({
+                'result': result
+            }))
             return jsonify({
                 'result': result
             })
