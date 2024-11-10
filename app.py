@@ -107,35 +107,63 @@ def detect_fracture():
             logger.error(f"Error preprocessing image: {str(e)}")
             return jsonify({'error': 'Error preprocessing image'}), 400
         
-        # Make prediction
+         # Make prediction
         try:
-            logger.info(f"Model input shape after preprocess: {model.input_shape}")
-            prediction = model.predict(preprocessed_image)
-            logger.info(f"Raw prediction: {prediction}")
+            logger.info("Starting prediction...")
+            logger.info(f"Preprocessed image shape: {preprocessed_image.shape}")
+            logger.info(f"Model input shape: {model.input_shape}")
             
-            if not isinstance(prediction, np.ndarray) or prediction.size == 0:
-                logger.error("Invalid prediction output")
-                return jsonify({'error': 'Invalid prediction output'}), 500
+            # Verify input shape matches model's expected input
+            if preprocessed_image.shape[1:] != model.input_shape[1:]:
+                logger.error(f"Shape mismatch: Got {preprocessed_image.shape}, expected {model.input_shape}")
+                return jsonify({'error': 'Input shape mismatch'}), 400
+
+            # Add timeouts and catch potential memory issues
+            try:
+                with tf.device('/CPU:0'):  # Force CPU usage to avoid GPU memory issues
+                    logger.info("Starting model.predict...")
+                    prediction = model.predict(preprocessed_image, verbose=1)
+                    logger.info("Completed model.predict")
+            except tf.errors.ResourceExhaustedError as e:
+                logger.error(f"Memory error during prediction: {str(e)}")
+                return jsonify({'error': 'Memory error during prediction'}), 500
+            except Exception as e:
+                logger.error(f"Error during model.predict: {str(e)}")
+                return jsonify({'error': 'Prediction failed'}), 500
+
+            logger.info(f"Raw prediction shape: {prediction.shape}")
+            logger.info(f"Raw prediction values: {prediction}")
+            
+            if not isinstance(prediction, np.ndarray):
+                logger.error(f"Unexpected prediction type: {type(prediction)}")
+                return jsonify({'error': 'Invalid prediction type'}), 500
                 
-            result = 'Fractured' if prediction[0][0] > 0.5 else 'Not Fractured'
-            probability = float(prediction[0][0])  # Convert to Python float for JSON serialization
-            
-            logger.info(f"Final result: {result} with probability: {probability}")
-            logger.info(jsonify({
-                'result': result
-            }))
-            return jsonify({
-                'result': result
-            })
+            if prediction.size == 0:
+                logger.error("Empty prediction array")
+                return jsonify({'error': 'Empty prediction'}), 500
+
+            try:
+                result = 'Fractured' if prediction[0][0] > 0.5 else 'Not Fractured'
+                logger.info(f"Classified as: {result}")
+                
+                response_data = {'result': result}
+                logger.info(f"Preparing response: {response_data}")
+                
+                json_response = jsonify(response_data)
+                logger.info("JSON response created successfully")
+                
+                return json_response
+                
+            except Exception as e:
+                logger.error(f"Error formatting prediction result: {str(e)}\n{traceback.format_exc()}")
+                return jsonify({'error': 'Error formatting result'}), 500
             
         except Exception as e:
-            logger.error(f"Error making prediction: {str(e)}\n{traceback.format_exc()}")
-            return jsonify({'error': 'Error making prediction'}), 500
-            
+            logger.error(f"Error in prediction block: {str(e)}\n{traceback.format_exc()}")
+            return jsonify({'error': 'Error during prediction processing'}), 500
     except Exception as e:
-        logger.error(f"Unexpected error: {str(e)}\n{traceback.format_exc()}")
-        return jsonify({'error': 'Internal server error'}), 500
-
+            logger.error(f"Error in prediction block 2: {str(e)}\n{traceback.format_exc()}")
+            return jsonify({'error': 'Error during prediction processing 2'}), 500
 @app.route('/')
 @cross_origin()
 def index():
